@@ -1,0 +1,22 @@
+# Conda environment specification
+name: urbansearch
+channels:
+  - pytorch
+  - nvidia
+  - defaults
+dependencies:
+  # Core packages installed with Conda
+  - python=3.10
+  - pytorch
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=12.1
+  # Other packages installed with Pip
+  - pip:
+    - transformers
+    - numpy
+    - Pillow
+    - matplotlib
+    - jupyterlab
+    - tqdm
+    - faiss-gpu
