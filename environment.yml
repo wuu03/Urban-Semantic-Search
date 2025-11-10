@@ -11,6 +11,8 @@ dependencies:
   - torchvision
   - pip
   - numpy<2.0
+  - faiss-gpu
+  - opencv
   # Pip
   - pip:
     - transformers==4.43
