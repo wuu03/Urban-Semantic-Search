@@ -22,3 +22,7 @@ dependencies:
     - tqdm
     - pandas
     - scipy
+    - geopandas 
+    - shapely
+    - sentence-transformers 
+    - pyarrow
