@@ -70,9 +70,9 @@ class VeniceCoordinateMapper:
         'thin_plate' function is used to simulate the physical TPS deformation.
         """
         # Train model for Map X
-        rbf_x = Rbf(self.gcp_df['pixel_x'], self.gcp_df['pixel_y'], self.gcp_df['map_x'], function='thin_plate')
+        rbf_x = Rbf(self.gcp_df['pixel_x'], self.gcp_df['pixel_y'], self.gcp_df['map_x'], function='thin_plate', smooth=0)
         # Train model for Map Y
-        rbf_y = Rbf(self.gcp_df['pixel_x'], self.gcp_df['pixel_y'], self.gcp_df['map_y'], function='thin_plate')
+        rbf_y = Rbf(self.gcp_df['pixel_x'], self.gcp_df['pixel_y'], self.gcp_df['map_y'], function='thin_plate', smooth=0)
         return rbf_x, rbf_y
 
     def transform_point(self, pixel_x, pixel_y):
@@ -105,7 +105,7 @@ class VeniceCoordinateMapper:
         Args:
             patch_x (int): Top-left X pixel coordinate of the patch.
             patch_y (int): Top-left Y pixel coordinate of the patch.
-            patch_size (int): The width/height of the patch (assuming square).
+            patch_size (int): The width/height of the patch.
             
         Returns:
             dict: A dictionary containing 'epsg3857' and 'wgs84' coordinates for 
