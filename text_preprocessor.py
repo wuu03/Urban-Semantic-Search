@@ -309,6 +309,38 @@ def process_1808_integrated(json_path):
     return napo_lookup
 
 # ================= PHASE 2: Process 1740 (Linked & Geo) =================
+def generate_semantic_anchor_1740(row):
+    """
+    Generates a Semantic Anchor (Header) for 1740 records.
+    Ensures that every chunk knows 'What', 'Where', and 'Who'.
+    """
+    # 1. Location
+    sestiere = SESTIERE_MAP.get(clean_val(row.get('sestiere')), row.get('sestiere'))
+    parish = clean_val(row.get('parish_std'))
+    
+    loc_str = "Venice"
+    if sestiere: loc_str = sestiere
+    if parish: loc_str += f" ({parish})"
+
+    # 2. Function (What)
+    # Prefer standardized TOP function, fallback to raw
+    func = clean_val(row.get('PP_Function_TOP'))
+    if not func: func = clean_val(row.get('function'))
+    if not func: func = "Property"
+    
+    # 3. Owner (Who)
+    # Prefer standardized Name, fallback to raw
+    owner_first = clean_val(row.get('PP_Owner_FirstName'))
+    owner_last = clean_val(row.get('PP_Owner_LastName'))
+    if owner_last:
+        owner = f"{owner_first} {owner_last}".strip()
+    else:
+        owner = clean_val(row.get('owner_name'))
+    
+    owner_str = f" owned by {owner}" if owner else ""
+
+    return f"This is a {func}{owner_str} located in {loc_str}."
+
 
 def process_1740_integrated(tsv_path, geojson_path, napo_lookup):
     print(f"\n[Phase 2] Processing 1740 Catastici Data: {tsv_path}")
@@ -334,7 +366,7 @@ def process_1740_integrated(tsv_path, geojson_path, napo_lookup):
         if 'uid' in gdf_geo.columns:
             gdf_geo['uid'] = gdf_geo['uid'].astype(str)
             # Merge: Right join on text means we keep all text records. 
-            merged_df = gdf_geo.merge(df_text, on='uid', how='right') 
+            merged_df = gdf_geo.merge(df_text, on='uid', how='right', suffixes=('_geo', '')) 
         else:
             print("Error: 'uid' not found in GeoJSON. Proceeding with text only.")
             merged_df = df_text
@@ -348,7 +380,10 @@ def process_1740_integrated(tsv_path, geojson_path, napo_lookup):
     
     print(f"Generating 1740 entries with Linkage...")
     for idx, row in merged_df.iterrows():
-        # --- A. Extract Attributes ---
+        # --- A. Generate Anchor (Header) ---
+        anchor_text = generate_semantic_anchor_1740(row)
+
+        # --- B. Extract Attributes ---
         sestiere = SESTIERE_MAP.get(clean_val(row.get('sestiere')), row.get('sestiere'))
         place = clean_val(row.get('place'))
         parish = clean_val(row.get('parish_std'))
@@ -387,8 +422,8 @@ def process_1740_integrated(tsv_path, geojson_path, napo_lookup):
 
         uid = str(row.get('uid', idx))
 
-        # --- B. Construct Text ---
-        sentences = [f"Record from 1740."]
+        # --- C. Construct Text ---
+        sentences = []
         
         # Context
         loc_parts = []
@@ -438,7 +473,7 @@ def process_1740_integrated(tsv_path, geojson_path, napo_lookup):
         
         if ppl_parts: sentences.append(". ".join(ppl_parts) + ".")
         
-        # --- C. LINKAGE INJECTION (The Hybrid Magic) ---
+        # --- D. LINKAGE INJECTION (The Hybrid Magic) ---
         if id_napo and str(id_napo) in napo_lookup:
             # Inject 1808 knowledge into 1740 record
             linked_info = napo_lookup[str(id_napo)]
@@ -446,10 +481,10 @@ def process_1740_integrated(tsv_path, geojson_path, napo_lookup):
         elif id_napo:
             sentences.append(f"Future Reference (1808 Link): Linked to Parcel {id_napo}.")
 
-        full_text = " ".join(sentences)
+        full_body_text = " ".join(sentences)
 
-        # --- D. Save Data ---
-        chunks = split_text(full_text, limit=CHUNK_SIZE_LIMIT)
+        # --- E. Save Data ---
+        chunks = split_text(full_body_text, limit=CHUNK_SIZE_LIMIT)
 
         geo_wkt = None
         if 'geometry' in row and row.geometry is not None:
@@ -462,13 +497,14 @@ def process_1740_integrated(tsv_path, geojson_path, napo_lookup):
             # For 1740, the "chunk" is often just the whole text, but if split,
             # we ensure the first part of context (e.g. "Record from 1740...") implies continuity.
             # split_text_smartly handles simple splitting.
-            
+            final_text = f"{anchor_text} Details: {chunk}"
+
             processed_rows.append({
                 'source_dataset': '1740_catastici',
                 'original_id': uid,
                 'chunk_id': f"{uid}_{i}",
-                'text_representation': chunk, # The chunked text
-                'embedding': get_embedding(chunk),
+                'text_representation': final_text, # The chunked text
+                'embedding': get_embedding(final_text),
                 'geometry': geo_wkt, # Duplicated geometry for each chunk
                 'metadata': json.dumps(meta_dict)
             })
@@ -489,6 +525,7 @@ if __name__ == "__main__":
     FILE_1808_AGG = "venice-1808-landregister/venice_1808_landregister_aggregated_data.json"
     FILE_1740_TSV = "venice-1740-landregister/1740_Catastici_2025-09-24.tsv"
     FILE_1740_GEO = "venice-1740-landregister/1740_Catastici_2025-09-24.geojson"
+    PARQUET_1808 = "processed_1808.parquet"
 
     # Step 1: Process 1808 first to build the Linkage Lookup Table
     napo_lookup_map = {}
