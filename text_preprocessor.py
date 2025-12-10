@@ -92,6 +92,117 @@ def split_text(text, limit=CHUNK_SIZE_LIMIT):
         
     return chunks
 
+# ================= Lean Metadata Builders =================
+
+def build_lean_meta_1808(texts_list, people_list, geo_props_list):
+    """
+    Constructs a lightweight metadata dictionary for 1808 data.
+    Retains only fields used for Frontend Display (Pop-ups) and Backend Filtering (SQL).
+    """
+    # 1. Extract Filter Fields (Sets to remove duplicates)
+    districts = set()
+    families = set()
+    qualities = set()
+    
+    # 2. Extract Display Fields
+    display_ids = set()
+    display_owners = set()
+    
+    # Iterate through text records
+    for t in texts_list:
+        if t.get('district'): districts.add(clean_val(t.get('district')))
+        if t.get('quality'): qualities.add(clean_val(t.get('quality')))
+        
+        p_num = clean_val(t.get('parcel_number'))
+        if p_num: display_ids.add(p_num)
+        
+        raw_own = clean_val(t.get('owner_transcription'))
+        if raw_own: display_owners.add(raw_own)
+
+    # Iterate through people records
+    for p in people_list:
+        fam = clean_val(p.get('own_family'))
+        if fam: families.add(fam)
+
+    # Iterate through geometry properties
+    geo_types = set()
+    parishes = set()
+    for g in geo_props_list:
+        if g.get('geometry_type'): geo_types.add(clean_val(g.get('geometry_type')))
+        if g.get('parish_standardised'): parishes.add(clean_val(g.get('parish_standardised')))
+
+    # Return structured dict
+    return {
+        'Year': 1808,
+        # --- Core Filters for SQL/Qdrant ---
+        'Districts': list(districts),
+        'Families': list(families),
+        'Functions': list(qualities),
+        # --- Display Details ---
+        'Parcel IDs': list(display_ids),
+        'Parishes': list(parishes),
+        'Geo Types': list(geo_types),
+        'Owners': list(display_owners),
+        # Take representative values from the first entry for simplicity
+        'Ownership Types': clean_val(texts_list[0].get('ownership_types')) if texts_list else None,
+        'Owner Type': clean_val(texts_list[0].get('owner_type')) if texts_list else None,
+        'Right of Use': clean_val(texts_list[0].get('owner_right_of_use')) if texts_list else None,
+        'Place': clean_val(texts_list[0].get('place')) if texts_list else None,
+        'Old Entity': clean_val(texts_list[0].get('old_entity')) if texts_list else None,
+        'Notes': clean_val(texts_list[0].get('owner_supplementary')) if texts_list else None
+    }
+
+def build_lean_meta_1740(row):
+    """
+    Constructs a lightweight metadata dictionary for 1740 data.
+    Retains fields specifically requested for text presentation and filtering.
+    """
+    # Construct Standardized Owner Name
+    owner = None
+    first = clean_val(row.get('PP_Owner_FirstName'))
+    last = clean_val(row.get('PP_Owner_LastName'))
+    if last:
+        owner = f"{first} {last}".strip()
+    else:
+        owner = clean_val(row.get('owner_name'))
+
+    district = SESTIERE_MAP.get(clean_val(row.get('sestiere')), clean_val(row.get('sestiere')))
+
+    return {
+        'Year': 1740,
+        # --- Detailed Attributes ---
+        'District': district,
+        'Parish': clean_val(row.get('parish_std')),
+        'Place': clean_val(row.get('place')),
+        'Function': clean_val(row.get('function')),
+        'Function Class': {
+            'TOP': clean_val(row.get('PP_Function_TOP')),
+            'MID': clean_val(row.get('PP_Function_MID'))
+        },
+        'Function Features': {
+            'Property': clean_val(row.get('PP_Function_PROPERTY')),
+            'Geometry': clean_val(row.get('PP_Function_GEOMETRY'))
+        },
+        'Bottega Info': {
+            'Trade': clean_val(row.get('PP_Bottega_TRAD')),
+            'Category': clean_val(row.get('PP_Bottega_METACATEGORY'))
+        },
+        'Economics': {
+            'Rent': clean_val(row.get('an_rendi')),
+            'Income Quantity': clean_val(row.get('quantity_income')),
+            'Income Quality': clean_val(row.get('quality_income'))
+        },
+        'People': {
+            'Tenant': clean_val(row.get('ten_name')),
+            'Owner': owner,
+            'Owner Title': clean_val(row.get('PP_Owner_Title')),
+            'Owner Profession': clean_val(row.get('owner_mestiere_std')),
+            'Owner Type': clean_val(row.get('PP_OwnerCode_SIMPL')),
+            'Owner Entity': clean_val(row.get('PP_Owner_Entity')),
+            'Owner Notes': clean_val(row.get('PP_Owner_Notes'))
+        }
+    }
+
 # ================= PHASE 1: Process 1808 (Hybrid & Chunking) =================
 
 def generate_semantic_anchor_1808(texts_list, people_list):
@@ -144,16 +255,22 @@ def generate_detailed_body_1808(t_item):
     own_types = clean_val(t_item.get('ownership_types'))
     owner_right = clean_val(t_item.get('owner_right_of_use'))
     usage_desc = []
-    if own_types: usage_desc.append(f"ownership type: {own_types}")
-    if owner_right: usage_desc.append(f"right of use: {owner_right}")
+    if own_types: usage_desc.append(f"Ownership type: {own_types}")
+    if owner_right: usage_desc.append(f"Right of use: {owner_right}")
     if usage_desc: parts.append("Legal status: " + "; ".join(usage_desc) + ".")
 
     # Historical Owners (Transcription) & Previous Entity
     owner_raw = clean_val(t_item.get('owner_transcription'))
-    if owner_raw: parts.append(f"Original owner record: {owner_raw}.")
+    owner_type = clean_val(t_item.get('owner_type'))
+    if owner_raw: parts.append(f"Original owner name: {owner_raw}.")
+    if owner_type: parts.append(f"Owner type: {owner_type}.")
     
     old_ent = clean_val(t_item.get('old_entity'))
+    old_owner_type = clean_val(t_item.get('old_owner_type'))
+    old_owner_right = clean_val(t_item.get('old_owner_right_of_use'))
     if old_ent: parts.append(f"Previously owned by: {old_ent}.")
+    if old_owner_type: parts.append(f"Previous owner type: {old_owner_type}.")
+    if old_owner_right: parts.append(f"Previous right of use: {old_owner_right}.")
     
     # Notes
     supp = clean_val(t_item.get('owner_supplementary'))
@@ -259,21 +376,23 @@ def process_1808_integrated(json_path):
                     napo_lookup[str(p_num)] = f"{anchor_text} {body_text[:150]}..."
 
         # --- D. Prepare Structured Metadata for SQL Filtering ---
-        # Extract unique districts, families, and parcel IDs for hard filtering
-        meta_districts = list(set([clean_val(t.get('district')) for t in texts_list if clean_val(t.get('district'))]))
-        meta_families = list(set([clean_val(p.get('own_family')) for p in people_list if clean_val(p.get('own_family'))]))
-        meta_parcel_nums = list(set([clean_val(t.get('parcel_number')) for t in texts_list if clean_val(t.get('parcel_number'))]))
+        # # Extract unique districts, families, and parcel IDs for hard filtering
+        # meta_districts = list(set([clean_val(t.get('district')) for t in texts_list if clean_val(t.get('district'))]))
+        # meta_families = list(set([clean_val(p.get('own_family')) for p in people_list if clean_val(p.get('own_family'))]))
+        # meta_parcel_nums = list(set([clean_val(t.get('parcel_number')) for t in texts_list if clean_val(t.get('parcel_number'))]))
 
-        # Dump full original data for frontend display
-        row_metadata = {
-            'year': 1808,
-            'filter_districts': meta_districts,
-            'filter_families': meta_families,
-            'filter_parcel_ids': meta_parcel_nums,
-            'geo_props': geo_props_list,
-            'raw_text': texts_list,
-            'raw_people': people_list
-        }
+        # # Dump full original data for frontend display
+        # row_metadata = {
+        #     'year': 1808,
+        #     'filter_districts': meta_districts,
+        #     'filter_families': meta_families,
+        #     'filter_parcel_ids': meta_parcel_nums,
+        #     'geo_props': geo_props_list,
+        #     'raw_text': texts_list,
+        #     'raw_people': people_list
+        # }
+
+        lean_metadata = build_lean_meta_1808(texts_list, people_list, geo_props_list)
 
         # Use the ID of the first feature as the main ID, or a fallback
         main_id = str(features[0].get('id', f"agg_{idx}"))
@@ -295,7 +414,7 @@ def process_1808_integrated(json_path):
                 'text_representation': final_text,
                 'embedding': get_embedding(final_text),
                 'geometry': geo_wkt, # The combined MultiPolygon
-                'metadata': json.dumps(row_metadata)
+                'metadata': json.dumps(lean_metadata)
             })
 
         if idx % 500 == 0:
@@ -315,7 +434,7 @@ def generate_semantic_anchor_1740(row):
     Ensures that every chunk knows 'What', 'Where', and 'Who'.
     """
     # 1. Location
-    sestiere = SESTIERE_MAP.get(clean_val(row.get('sestiere')), row.get('sestiere'))
+    sestiere = SESTIERE_MAP.get(clean_val(row.get('sestiere')), clean_val(row.get('sestiere')))
     parish = clean_val(row.get('parish_std'))
     
     loc_str = "Venice"
@@ -483,6 +602,7 @@ def process_1740_integrated(tsv_path, geojson_path, napo_lookup):
 
         full_body_text = " ".join(sentences)
 
+        lean_metadata = build_lean_meta_1740(row)
         # --- E. Save Data ---
         chunks = split_text(full_body_text, limit=CHUNK_SIZE_LIMIT)
 
@@ -490,8 +610,8 @@ def process_1740_integrated(tsv_path, geojson_path, napo_lookup):
         if 'geometry' in row and row.geometry is not None:
              geo_wkt = row.geometry.wkt
         
-        # Clean metadata (remove geometry objects to allow JSON serialization)
-        meta_dict = {k: v for k, v in row.items() if k != 'geometry' and clean_val(v) is not None}
+        # # Clean metadata (remove geometry objects to allow JSON serialization)
+        # meta_dict = {k: v for k, v in row.items() if k != 'geometry' and clean_val(v) is not None}
         
         for i, chunk in enumerate(chunks):
             # For 1740, the "chunk" is often just the whole text, but if split,
@@ -506,7 +626,7 @@ def process_1740_integrated(tsv_path, geojson_path, napo_lookup):
                 'text_representation': final_text, # The chunked text
                 'embedding': get_embedding(final_text),
                 'geometry': geo_wkt, # Duplicated geometry for each chunk
-                'metadata': json.dumps(meta_dict)
+                'metadata': json.dumps(lean_metadata)
             })
         
         if idx % 500 == 0:
