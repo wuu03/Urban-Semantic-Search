@@ -5,7 +5,6 @@ from PIL import Image
 from tqdm import tqdm
 import numpy as np
 
-
 try:
     import core.vision_encoder.pe as pe
     import core.vision_encoder.transforms as pe_transforms
@@ -66,6 +65,17 @@ class PEFeatureExtractor:
         return features / norm
 
     @torch.no_grad()
+    @torch.autocast("cuda")
+    def extract_text_features_batch(self, text_queries, batch_size=128):
+        all_features = []
+        for i in range(0, len(text_queries), batch_size):
+            batch = text_queries[i:i + batch_size]
+            text_tensor = self.tokenizer(batch).to(self.device)
+            text_features = self.model.encode_text(text_tensor)
+            all_features.append(text_features.cpu().numpy())
+        return np.vstack(all_features)
+
+    @torch.no_grad()
     @torch.autocast("cuda")  # Use mixed precision for faster inference
     def extract_image_features(self, patch_images, batch_size=64):
         """
@@ -110,7 +120,7 @@ class PEFeatureExtractor:
         Returns:
             np.ndarray: A normalized (1, feature_dim) feature vector.
         """
-        print(f"Extracting text features for: '{text_query}'")
+        # print(f"Extracting text features for: '{text_query}'")
 
         # 1. Tokenize: convert text to tensor
         text_tensor = self.tokenizer([text_query]).to(self.device)
@@ -122,7 +132,6 @@ class PEFeatureExtractor:
 
         # Normalize features
         return self._normalize_features(features_array)
-
 
 
 class FeatureExtractor:
