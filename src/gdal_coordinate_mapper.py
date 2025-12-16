@@ -1,5 +1,10 @@
+from typing import List, Tuple, Dict, Any, Optional
+import concurrent.futures
 from osgeo import gdal, osr
 import math
+
+from tqdm import tqdm
+
 
 class VeniceGDALMapper:
     """
@@ -21,7 +26,7 @@ class VeniceGDALMapper:
         """
         print(f"[GDAL Mapper] Loading GCPs from {gcp_file_path}...")
         self.gcps = self._load_gcps_gdal(gcp_file_path)
-        
+
         # Initialize the Transformer
         # We create a temporary in-memory dataset to hold the GCPs for GDAL to process.
         self.transformer = self._create_transformer()
@@ -48,7 +53,7 @@ class VeniceGDALMapper:
                             map_y = float(parts[1])
                             pixel_x = float(parts[2])
                             pixel_y = float(parts[3])
-                            
+
                             # Note: QGIS exports often have negative pixel_y values.
                             # We pass these raw values to GDAL; we will handle the sign logic
                             # during the transformation step if necessary.
@@ -59,10 +64,10 @@ class VeniceGDALMapper:
                         continue
         except Exception as e:
             raise IOError(f"Failed to read GCP file: {e}")
-            
+
         if not gdal_gcps:
             raise ValueError("No valid GCP points found in file.")
-            
+
         return gdal_gcps
 
     def _create_transformer(self):
@@ -73,12 +78,12 @@ class VeniceGDALMapper:
         srs = osr.SpatialReference()
         srs.ImportFromEPSG(3857)
         wkt = srs.ExportToWkt()
-        
+
         # 2. Create a dummy in-memory dataset (1x1 pixel) to attach GCPs to
         driver = gdal.GetDriverByName('MEM')
-        ds = driver.Create('', 1, 1, 0) 
+        ds = driver.Create('', 1, 1, 0)
         ds.SetGCPs(self.gcps, wkt)
-        
+
         # 3. Create the Transformer
         # 'METHOD=GCP_TPS' explicitly selects the Thin Plate Spline algorithm.
         return gdal.Transformer(ds, None, ['METHOD=GCP_TPS'])
@@ -102,18 +107,18 @@ class VeniceGDALMapper:
             input_line = -pixel_y
         else:
             input_line = pixel_y
-            
+
         input_pixel = pixel_x
 
         # Execute transformation
         # TransformPoint arguments: (bDstToSrc, x, y, z)
         # 0 = Forward transform (Pixel -> Geo)
         success, point = self.transformer.TransformPoint(0, input_pixel, input_line)
-        
+
         if not success:
             raise RuntimeError("GDAL Transformation failed for point.")
-            
-        return point[0], point[1] # Returns MapX, MapY
+
+        return point[0], point[1]  # Returns MapX, MapY
 
     def to_wgs84(self, x, y):
         """
@@ -151,22 +156,96 @@ class VeniceGDALMapper:
 
         # Define key points in pixel space (relative to top-left origin)
         points_pixel = {
-            'center':       (patch_x + w / 2, patch_y + h / 2),
-            'top_left':     (patch_x, patch_y),
-            'top_right':    (patch_x + w, patch_y),
+            'center': (patch_x + w / 2, patch_y + h / 2),
+            'top_left': (patch_x, patch_y),
+            'top_right': (patch_x + w, patch_y),
             'bottom_right': (patch_x + w, patch_y + h),
-            'bottom_left':  (patch_x, patch_y + h)
+            'bottom_left': (patch_x, patch_y + h)
         }
-        
+
         result = {'epsg3857': {}, 'wgs84': {}}
-        
+
         for key, (px, py) in points_pixel.items():
             # 1. Transform to Projected Metric Coordinates (EPSG:3857)
             gx, gy = self.transform_point(px, py)
             result['epsg3857'][key] = [gx, gy]
-            
+
             # 2. Convert to Geographic Coordinates (Lat, Lon)
             lat, lon = self.to_wgs84(gx, gy)
             result['wgs84'][key] = [lat, lon]
-            
+
         return result
+
+    def _process_single_patch(self, args) -> Optional[Dict[str, Any]]:
+        """
+        Internal worker method for processing a single patch.
+        Args:
+            args: Tuple containing (index, (x, y), patch_size)
+        """
+        i, (patch_x, patch_y), patch_size = args
+
+        # Handle patch_size whether it's a tuple or int
+        if isinstance(patch_size, (tuple, list)):
+            w, h = patch_size
+        else:
+            w = h = patch_size
+
+        try:
+            # Define key points
+            points_pixel = {
+                'center': (patch_x + w / 2, patch_y + h / 2),
+                'top_left': (patch_x, patch_y),
+                'bottom_right': (patch_x + w, patch_y + h)
+            }
+
+            geo_info = {'epsg3857': {}, 'wgs84': {}}
+
+            for key, (px, py) in points_pixel.items():
+                gx, gy = self.transform_point(px, py)
+                lat, lon = self.to_wgs84(gx, gy)
+
+                # 修改点：使用列表 [x, y] 而不是字典 {'x': x, 'y': y}
+                # 这解决了 store_data.py 中的 KeyError: 0
+                geo_info['epsg3857'][key] = [gx, gy]
+                geo_info['wgs84'][key] = [lat, lon]
+
+            return {
+                "index": i,
+                "pixel_coords": [int(patch_x), int(patch_y)],
+                "geo_geometry": geo_info
+            }
+        except Exception as e:
+            # Return None or error dict if needed, logging the error
+            # print(f"Error processing patch {i}: {e}")
+            return None
+
+    def transform_patches(self, patch_coords: List[Tuple[int, int]], patch_size: Tuple[int, int],
+                          max_workers: int = 4) -> List[Dict[str, Any]]:
+        """
+        Batch transforms a list of patch coordinates to geographical metadata.
+        Uses multi-threading for performance.
+
+        Args:
+            patch_coords: List of (x, y) tuples representing top-left corners.
+            patch_size: Tuple (width, height) of the patches.
+            max_workers: Number of threads to use.
+
+        Returns:
+            List of dictionaries containing geo-registered data.
+        """
+        print(f"Registering {len(patch_coords)} patches using {max_workers} threads...")
+
+        # Prepare arguments for the worker
+        tasks = [(i, coords, patch_size) for i, coords in enumerate(patch_coords)]
+
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Map returns an iterator that maintains order
+            results = list(
+                tqdm(executor.map(self._process_single_patch, tasks), total=len(tasks), desc="Geo-Rectification"))
+
+        # Filter out failed transformations (None values)
+        registered_data = [res for res in results if res is not None]
+
+        print(f"Successfully registered {len(registered_data)} patches.")
+        return registered_data

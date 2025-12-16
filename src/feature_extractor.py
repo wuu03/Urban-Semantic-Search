@@ -1,7 +1,6 @@
 # src/feature_extractor.py
 import torch
 from transformers import AutoProcessor, AutoModel
-from PIL import Image
 from tqdm import tqdm
 import numpy as np
 
@@ -54,10 +53,10 @@ class PEFeatureExtractor:
         self.model = self.model.to(self.device)
         self.model.eval()
 
-        # 2. Get the image and text preprocessing utilities
+        # 2. Get the image and processed_text preprocessing utilities
         self.preprocess = pe_transforms.get_image_transform(self.model.image_size)
         self.tokenizer = pe_transforms.get_text_tokenizer(self.model.context_length)
-        print(f"Model {model_name} loaded successfully. Image size: {self.model.image_size}px")
+        print(f"Model {model_name} loaded successfully.")
 
     def _normalize_features(self, features):
         """L2-normalize feature vectors."""
@@ -76,7 +75,7 @@ class PEFeatureExtractor:
         return np.vstack(all_features)
 
     @torch.no_grad()
-    @torch.autocast("cuda")  # Use mixed precision for faster inference
+    @torch.autocast("cuda")
     def extract_image_features(self, patch_images, batch_size=64):
         """
         Extract PE core features for batches of image patches.
@@ -112,20 +111,20 @@ class PEFeatureExtractor:
     @torch.autocast("cuda")
     def extract_text_features(self, text_query):
         """
-        Extract PE core features for a single text query.
+        Extract PE core features for a single processed_text query.
 
         Args:
-            text_query (str): The text query string.
+            text_query (str): The processed_text query string.
 
         Returns:
             np.ndarray: A normalized (1, feature_dim) feature vector.
         """
-        # print(f"Extracting text features for: '{text_query}'")
+        # print(f"Extracting processed_text features for: '{text_query}'")
 
-        # 1. Tokenize: convert text to tensor
+        # 1. Tokenize: convert processed_text to tensor
         text_tensor = self.tokenizer([text_query]).to(self.device)
 
-        # 2. Encode text
+        # 2. Encode processed_text
         text_features = self.model.encode_text(text_tensor)
 
         features_array = text_features.cpu().numpy()
@@ -195,15 +194,15 @@ class FeatureExtractor:
     @torch.no_grad()
     def extract_text_features(self, text_query):
         """
-        Extracts features for a single text query.
+        Extracts features for a single processed_text query.
 
         Args:
-            text_query (str): The text query string.
+            text_query (str): The processed_text query string.
 
         Returns:
             np.ndarray: A normalized 1D feature vector of shape (1, feature_dim).
         """
-        print(f"Extracting text features for: '{text_query}'")
+        print(f"Extracting processed_text features for: '{text_query}'")
         inputs = self.processor(text=[text_query], return_tensors="pt").to(self.device)
 
         text_features = self.model.get_text_features(**inputs)
