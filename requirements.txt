@@ -1,0 +1,13 @@
+GDAL==3.8.4
+geopandas==1.1.1
+matplotlib==3.10.8
+numpy==2.3.5
+pandas==2.3.3
+perception_models==1.0.0
+Pillow==12.0.0
+qdrant_client==1.16.2
+sentence_transformers==5.1.2
+Shapely==2.1.2
+torch==2.6.0+cu124
+tqdm==4.67.1
+transformers==4.55.4
