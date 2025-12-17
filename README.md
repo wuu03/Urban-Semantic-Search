@@ -55,17 +55,17 @@ The system consists of two parallel processing pipelines that feed into a **Qdra
 ```
 Urban-Semantic-Search/
 ├── data/
-│   ├── raw_maps/           # High-res historical maps and GCP points
-│   ├── processed_text/    # Text records after processing
+│   ├── raw_maps/            # High-res historical maps and GCP points
+│   ├── processed_text/      # Text records after processing
 ├── src/
 │   ├── feature_extractor.py      # PE model wrappers
 │   ├── gdal_coordinate_mapper.py # TPS georeferencing
 │   ├── patch_utils.py            # Sliding window image slicing
 │   ├── store_data.py             # Qdrant DB ingestion
-│   ├── text_preprocessor.py      # Text linearization & cleaning
+│   ├── text_preprocessor.py      # Text serialization & embedding
 │   └── visualizer.py             # Result visualization
-├── pipeline.ipynb              # Main pipeline execution notebook
-├── requirements.txt        # Python dependencies
+├── pipeline.ipynb            # Main pipeline execution notebook
+├── requirements.txt          # Python dependencies
 └── README.md
 ````
 
