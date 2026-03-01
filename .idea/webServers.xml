@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="08b5d70e-3f86-4975-b6cc-a8efffec7ad6" name="DHLAB">
+        <fileTransfer rootFolder="/home/xiwang" accessType="SFTP" host="iccluster028.iccluster.epfl.ch" port="22" sshConfigId="22df9e8d-c2d8-454c-9765-918b1376869a" sshConfig="xiwang@iccluster028.iccluster.epfl.ch:22 password">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="SshConfigs">
+    <configs>
+      <sshConfig authType="PASSWORD" host="iccluster028.iccluster.epfl.ch" id="22df9e8d-c2d8-454c-9765-918b1376869a" port="22" nameFormat="DESCRIPTIVE" username="xiwang" useOpenSSHConfig="true" />
+    </configs>
+  </component>
+</project>
