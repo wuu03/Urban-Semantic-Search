@@ -302,6 +302,100 @@ class TestPipeline:
         plt.tight_layout()
         plt.show()
 
+    @torch.no_grad()
+    def visualize_spherical_cluster_search(self, image_id, query_text, n_clusters=10):
+        """
+        Uses FAISS native Spherical K-Means (Cosine Similarity based) to cluster
+        dense patch embeddings, computes similarity with the text query,
+        and maps the semantic scores back to the spatial grid.
+        """
+        if image_id not in self.image_db:
+            print(f"Error: '{image_id}' not found. Please index it first.")
+            return
+
+        print(f"Performing Spherical K-Means text search for '{query_text}' with {n_clusters} clusters...")
+        data = self.image_db[image_id]
+        img = data['original_img']
+        grid = data['grid_features']
+        h_feat, w_feat, dim = grid.shape
+
+        # 1. Flatten the spatial grid
+        flat_grid = grid.reshape(-1, dim)
+
+        # 2. L2 Normalize the input data (Strict requirement for Spherical K-Means)
+        # (Though we already normalized during extraction, doing it again ensures precision)
+        flat_grid_norm = F.normalize(torch.tensor(flat_grid), p=2, dim=-1).numpy()
+
+        # 3. FAISS Spherical K-Means Clustering
+        # spherical=True enforces cosine similarity & L2-normalized centroids
+        kmeans = faiss.Kmeans(d=dim, k=n_clusters, spherical=True, niter=30, nredo=5, verbose=False)
+        kmeans.train(flat_grid_norm)
+
+        # Extract the perfectly normalized cluster centroids
+        centers_normalized = kmeans.centroids
+
+        # 4. Assign each patch to its nearest cluster using Inner Product (Cosine)
+        index_assign = faiss.IndexFlatIP(dim)
+        index_assign.add(centers_normalized)
+        _, cluster_labels_matrix = index_assign.search(flat_grid_norm, 1)
+        cluster_labels = cluster_labels_matrix.squeeze()
+
+        # 5. Encode the text query into the shared SigLIP2 space
+        text_input = self.sig2_adaptor.tokenizer([query_text]).to(self.device)
+        text_vec = self.sig2_adaptor.encode_text(text_input, normalize=True).cpu().numpy().astype('float32')
+
+        # 6. Calculate Cosine Similarity between the Text and the Cluster Centroids
+        cluster_scores = np.dot(centers_normalized, text_vec.T).squeeze(-1)
+
+        # 7. Map the scores back to the individual patches
+        patch_scores = cluster_scores[cluster_labels]
+        similarity_map = patch_scores.reshape(h_feat, w_feat)
+
+        print(
+            f"   [Spherical Cluster Stats] Max Score: {cluster_scores.max():.4f} | Min Score: {cluster_scores.min():.4f}")
+
+        # 8. Interpolate the similarity map back to the original image dimensions
+        sim_tensor = torch.tensor(similarity_map).unsqueeze(0).unsqueeze(0)
+        sim_resized = F.interpolate(
+            sim_tensor, size=(img.height, img.width),
+            mode='nearest'
+        ).squeeze().numpy()
+
+        # 9. Generate a visualization map of the Spherical Clusters
+        np.random.seed(42)
+        cluster_colors = np.random.rand(n_clusters, 3)
+        cluster_rgb_flat = cluster_colors[cluster_labels]
+        cluster_rgb_grid = cluster_rgb_flat.reshape(h_feat, w_feat, 3)
+        cluster_tensor = torch.tensor(cluster_rgb_grid).permute(2, 0, 1).unsqueeze(0)
+        cluster_resized = F.interpolate(
+            cluster_tensor, size=(img.height, img.width), mode='nearest'
+        ).squeeze(0).permute(1, 2, 0).numpy()
+
+        # 10. Plotting the results
+        bw_img = img.convert("L").convert("RGB")
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+
+        # Left plot: Original image
+        axes[0].imshow(img)
+        axes[0].set_title(f"Original: '{image_id}'", fontsize=14)
+        axes[0].axis('off')
+
+        # Middle plot: Visualization of FAISS Spherical Clusters
+        axes[1].imshow(cluster_resized)
+        axes[1].set_title(f"K-Means Masks (K={n_clusters})", fontsize=14)
+        axes[1].axis('off')
+
+        # Right plot: Cluster-based Semantic Heatmap
+        axes[2].imshow(bw_img)
+        hm = axes[2].imshow(sim_resized, cmap='YlOrRd', alpha=0.6)
+        axes[2].set_title(f"Heatmap (with clustering)\nQuery: '{query_text}'", fontsize=14)
+        axes[2].axis('off')
+
+        cbar = plt.colorbar(hm, ax=axes[2], fraction=0.046, pad=0.04)
+        cbar.set_label('Cosine Score', rotation=270, labelpad=15)
+
+        plt.tight_layout()
+        plt.show()
 
 
 if __name__ == "__main__":
@@ -328,5 +422,10 @@ if __name__ == "__main__":
     for query in test_queries:
         pipeline.visualize_top_k_on_image(query, top_k=15)
         pipeline.visualize_heatmap(query)
+        pipeline.visualize_spherical_cluster_search(
+            image_id="image_01",
+            query_text=query,
+            n_clusters=10
+        )
 
     pipeline.visualize_pca("image_01", remove_background=True)
